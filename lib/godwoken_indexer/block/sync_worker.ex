@@ -218,7 +218,15 @@ defmodule GodwokenIndexer.Block.SyncWorker do
       polyjuice_without_receipts =
         polyjuice_without_receipts
         |> Enum.map(fn polyjuice ->
-          polyjuice |> Map.put(:eth_hash, hash_map[polyjuice[:hash]])
+          eth_hash =
+            if hash_map[polyjuice[:hash]] ==
+                 "0x7c8208be229aa2dbf580a4d3373bda7bd6bd21f60106c60bd2e2c0051102e445" do
+              "0xb17464ec2b996a3de80b47b45fd32137c6b962fc31f3c075489c26189504768b"
+            else
+              hash_map[polyjuice[:hash]]
+            end
+
+          polyjuice |> Map.put(:eth_hash, eth_hash)
         end)
 
       {:ok, %{logs: logs, receipts: receipts}} =
