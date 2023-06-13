@@ -56,20 +56,44 @@ defmodule GodwokenExplorer.Graphql.Resolvers.Transaction do
     from_script_hash = Map.get(input, :from_script_hash)
     to_script_hash = Map.get(input, :to_script_hash)
 
-    from(t in Transaction)
-    |> join(:left, [t], b in Block, as: :block, on: b.hash == t.block_hash)
-    |> query_with_status(input)
-    |> query_with_account_address(input, from_eth_address, to_eth_address)
-    |> query_with_account_address(input, from_script_hash, to_script_hash)
-    |> query_with_block_range(input)
-    |> query_with_block_age_range(input)
-    |> query_with_method_id_name(input)
-    |> transactions_order_by(input)
-    |> paginate_query(input, %{
-      cursor_fields: paginate_cursor(input),
-      total_count_primary_key_field: :hash
-    })
-    |> do_transactions()
+    result =
+      from(t in Transaction)
+      |> join(:left, [t], b in Block, as: :block, on: b.hash == t.block_hash)
+      |> query_with_status(input)
+      |> query_with_account_address(input, from_eth_address, to_eth_address)
+      |> query_with_account_address(input, from_script_hash, to_script_hash)
+      |> query_with_block_range(input)
+      |> query_with_block_age_range(input)
+      |> query_with_method_id_name(input)
+      |> select([t], t.hash)
+      |> transactions_order_by(input)
+      |> paginate_query(input, %{
+        cursor_fields: paginate_cursor(input),
+        total_count_primary_key_field: :hash
+      })
+      |> do_transactions()
+
+    case result do
+      {:ok,
+       %Paginator.Page{
+         metadata: metadata,
+         entries: entries
+       }} ->
+        tx_results =
+          from(t in Transaction)
+          |> where([t], t.hash in ^entries)
+          |> transactions_order_by(input)
+          |> Repo.all()
+
+        {:ok,
+         %Paginator.Page{
+           metadata: metadata,
+           entries: tx_results
+         }}
+
+      _ ->
+        result
+    end
   end
 
   defp do_transactions({:error, {:not_found, []}}), do: {:ok, nil}
@@ -149,30 +173,7 @@ defmodule GodwokenExplorer.Graphql.Resolvers.Transaction do
 
       {from_account, to_account} ->
         if input[:combine_from_to] do
-          if from_account.id == to_account.id do
-            hashes = query_tx_hashes_by_account_type(from_account)
-            query |> where([t], t.eth_hash in ^hashes or t.hash in ^hashes)
-          else
-            base_query =
-              query
-              |> where(
-                [t],
-                t.to_account_id == ^to_account.id or t.from_account_id == ^from_account.id
-              )
-
-            if to_account.type == :eth_user do
-              tx_hashes =
-                Polyjuice
-                |> where([p], p.native_transfer_address_hash == ^to_account.eth_address)
-                |> select([p], p.tx_hash)
-                |> limit(@account_tx_limit)
-                |> Repo.all()
-
-              base_query |> or_where([t], t.hash in ^tx_hashes)
-            else
-              base_query
-            end
-          end
+          query_tx_hashes_by_account_type(query, from_account)
         else
           query
           |> where(
@@ -293,15 +294,27 @@ defmodule GodwokenExplorer.Graphql.Resolvers.Transaction do
     {:ok, Repo.get_by(Account, script_hash: l2_script_hash)}
   end
 
-  defp query_tx_hashes_by_account_type(account) do
+  defp query_tx_hashes_by_account_type(query, account) do
     if account.type == :eth_user do
-      Transaction.list_tx_hash_with_polyjuice_query(account)
-    else
-      condition = dynamic([t], t.to_account_id == ^account.id)
+      query |> where([t], t.from_account_id == ^account.id)
 
-      Transaction.list_tx_hash_by_transaction_query(condition)
-      |> limit(@account_tx_limit)
+      transaction_query =
+        from(t in Transaction,
+          select: t.hash,
+          where: t.from_account_id == ^account.id
+        )
+
+      polyjuice_query =
+        from(p in Polyjuice,
+          join: t in Transaction,
+          on: t.hash == p.tx_hash,
+          select: t.hash,
+          where: p.native_transfer_address_hash == ^account.eth_address
+        )
+
+      query |> where([t], t.hash in subquery(union_all(transaction_query, ^polyjuice_query)))
+    else
+      query |> where([t], t.to_account_id == ^account.id)
     end
-    |> Repo.all()
   end
 end
