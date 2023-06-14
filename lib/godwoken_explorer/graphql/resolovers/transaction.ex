@@ -14,7 +14,6 @@ defmodule GodwokenExplorer.Graphql.Resolvers.Transaction do
 
   @sorter_fields [:block_number, :index, :hash]
   @default_sorter @sorter_fields
-  @account_tx_limit 100_000
 
   def transaction(_parent, %{input: input} = _args, _resolution) do
     query = query_with_eth_hash_or_tx_hash(input)
@@ -56,51 +55,46 @@ defmodule GodwokenExplorer.Graphql.Resolvers.Transaction do
     from_script_hash = Map.get(input, :from_script_hash)
     to_script_hash = Map.get(input, :to_script_hash)
 
-    result =
-      from(t in Transaction)
-      |> join(:left, [t], b in Block, as: :block, on: b.hash == t.block_hash)
-      |> query_with_status(input)
-      |> query_with_account_address(input, from_eth_address, to_eth_address)
-      |> query_with_account_address(input, from_script_hash, to_script_hash)
-      |> query_with_block_range(input)
-      |> query_with_block_age_range(input)
-      |> query_with_method_id_name(input)
-      |> select([t], t.hash)
-      |> transactions_order_by(input)
-      |> paginate_query(input, %{
-        cursor_fields: paginate_cursor(input),
-        total_count_primary_key_field: :hash
-      })
-      |> do_transactions()
-
-    case result do
-      {:ok,
-       %Paginator.Page{
-         metadata: metadata,
-         entries: entries
-       }} ->
-        tx_results =
-          from(t in Transaction)
-          |> where([t], t.hash in ^entries)
-          |> transactions_order_by(input)
-          |> Repo.all()
-
-        {:ok,
-         %Paginator.Page{
-           metadata: metadata,
-           entries: tx_results
-         }}
-
-      _ ->
-        result
-    end
+    from(t in Transaction)
+    |> join(:left, [t], b in Block, as: :block, on: b.hash == t.block_hash)
+    |> query_with_status(input)
+    |> query_with_account_address(input, from_eth_address, to_eth_address)
+    |> query_with_account_address(input, from_script_hash, to_script_hash)
+    |> query_with_block_range(input)
+    |> query_with_block_age_range(input)
+    |> query_with_method_id_name(input)
+    |> select([t], %{hash: t.hash, block_number: t.block_number, index: t.index})
+    |> transactions_order_by(input)
+    |> paginate_query(input, %{
+      cursor_fields: paginate_cursor(input),
+      total_count_primary_key_field: :hash
+    })
+    |> do_transactions(input)
   end
 
-  defp do_transactions({:error, {:not_found, []}}), do: {:ok, nil}
-  defp do_transactions({:error, _} = error), do: error
+  defp do_transactions({:error, {:not_found, []}}, _input), do: {:ok, nil}
+  defp do_transactions({:error, _} = error, _input), do: error
 
-  defp do_transactions(result) do
-    {:ok, result}
+  defp do_transactions(
+         %Paginator.Page{
+           metadata: metadata,
+           entries: entries
+         },
+         input
+       ) do
+    tx_hashes = entries |> Enum.map(fn entry -> entry.hash end)
+
+    tx_results =
+      from(t in Transaction)
+      |> where([t], t.hash in ^tx_hashes)
+      |> transactions_order_by(input)
+      |> Repo.all()
+
+    {:ok,
+     %Paginator.Page{
+       metadata: metadata,
+       entries: tx_results
+     }}
   end
 
   defp query_with_account_address(query, input, from_address, to_address) do
