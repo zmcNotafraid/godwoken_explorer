@@ -59,7 +59,7 @@ defmodule GodwokenExplorer.BlockView do
     |> Repo.paginate(
       page: page,
       page_size: page_size,
-      paging_options: paging_options
+      options: paging_options
     )
   end
 end
