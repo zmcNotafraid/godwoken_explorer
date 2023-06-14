@@ -17,6 +17,21 @@ defmodule GodwokenExplorer.Chain.Cache.TransactionCount do
 
   alias GodwokenExplorer.{Repo, Transaction}
 
+  def estimated_count do
+    cached_value = __MODULE__.get_count()
+
+    if is_nil(cached_value) do
+      %Postgrex.Result{rows: [[count]]} =
+        Repo.query!(
+          "SELECT reltuples::BIGINT AS estimate FROM pg_class WHERE relname = 'transactions';"
+        )
+
+      max(count, 0)
+    else
+      cached_value
+    end
+  end
+
   defp handle_fallback(:count) do
     # This will get the task PID if one exists and launch a new task if not
     # See next `handle_fallback` definition
@@ -32,12 +47,6 @@ defmodule GodwokenExplorer.Chain.Cache.TransactionCount do
       Task.start(fn ->
         try do
           result = Repo.aggregate(Transaction, :count, :hash, timeout: :infinity)
-          # %Postgrex.Result{rows: [[rows]]} =
-          #   Repo.query!(
-          #     Repo.aggregate(:count, Transaction)
-          #   )
-
-          # result = trunc(rows)
 
           set_count(result)
         rescue
