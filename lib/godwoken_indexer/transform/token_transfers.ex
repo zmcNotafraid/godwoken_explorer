@@ -141,7 +141,7 @@ defmodule GodwokenIndexer.Transform.TokenTransfers do
       to_address_hash: to_address_hash,
       token_contract_address_hash: log.address_hash,
       transaction_hash: log.transaction_hash,
-      token_ids: nil,
+      token_id: nil,
       token_type: :erc20
     }
 
