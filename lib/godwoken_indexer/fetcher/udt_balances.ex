@@ -109,7 +109,11 @@ defmodule GodwokenIndexer.Fetcher.UDTBalances do
   end
 
   defp set_token_balance_value({:error, error_message}, token_balance) do
-    Map.merge(token_balance, %{value: nil, value_fetched_at: nil, error: error_message})
+    Map.merge(token_balance, %{
+      value: nil,
+      value_fetched_at: DateTime.utc_now(),
+      error: error_message
+    })
   end
 
   defp ignore_request_with_errors(%{value: nil, value_fetched_at: nil, error: _error}), do: false
